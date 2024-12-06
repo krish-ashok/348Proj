@@ -1,5 +1,3 @@
-pip install sqlalchemy
-
 import streamlit as st
 from sqlalchemy import create_engine, Column, Integer, String, Date, Time, ForeignKey, Table, text
 from sqlalchemy.orm import sessionmaker, declarative_base, relationship
