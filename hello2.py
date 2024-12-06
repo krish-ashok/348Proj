@@ -1,7 +1,9 @@
 import streamlit as st
 from sqlalchemy import create_engine, Column, Integer, String, Date, Time, ForeignKey, Table, text
 from sqlalchemy.orm import sessionmaker, declarative_base, relationship
-from datetime import datetime, time
+from sqlalchemy import Index
+from datetime import datetime, time, timedelta
+import random
 
 # Database setup
 engine = create_engine('sqlite:///movie.db')
@@ -43,6 +45,15 @@ class Showtime(Base):
     show_date = Column(Date, nullable=False)
     show_time = Column(Time, nullable=False)
 
+# Indexes
+Index('ix_showtimes_show_date_room_id', Showtime.show_date, Showtime.room_id)
+Index('ix_movies_title', Movie.title)
+Index('ix_movie_room_association_movie_id_room_id', 
+      movie_room_association.c.movie_id, 
+      movie_room_association.c.room_id)
+Index('ix_rooms_room_number', Room.room_number)
+Index('ix_showtimes_movie_id', Showtime.movie_id)
+
 # Create tables
 Base.metadata.create_all(engine)
 
@@ -63,7 +74,6 @@ def add_sample_data():
 if st.button("Add Sample Data"):
     add_sample_data()
 
-# ORM-based CRUD for Movies
 def get_all_movies():
     return session.query(Movie).all()
 
@@ -86,7 +96,6 @@ def delete_movie_orm(movie_id):
     session.delete(movie)
     session.commit()
 
-# Fetching movie-room associations with prepared statements
 def fetch_movie_rooms(movie_id):
     query = text("""
         SELECT Rooms.room_id, Rooms.room_number
@@ -98,7 +107,6 @@ def fetch_movie_rooms(movie_id):
     result = session.execute(query, {'movie_id': movie_id}).fetchall()
     return [(row.room_id, row.room_number) for row in result]
 
-# Updating movie-room associations with prepared statements
 def update_movie_rooms(movie_id, room_ids):
     session.execute(text("DELETE FROM movie_room_association WHERE movie_id = :movie_id"), {'movie_id': movie_id})
     for room_id in room_ids:
@@ -108,12 +116,27 @@ def update_movie_rooms(movie_id, room_ids):
         )
     session.commit()
 
-# Generating a report with filters using prepared statements
+def add_showtimes_for_movie(movie_id, room_ids, release_date, weeks=2, shows_per_week=3):
+    showtimes = []
+    for week in range(weeks):
+        for _ in range(shows_per_week):
+            show_date = release_date + timedelta(days=week * 7 + random.randint(0, 6))
+            show_time = time(hour=random.randint(10, 22), minute=random.choice([0, 30]))  # Random time between 10 AM and 10 PM
+            for room_id in room_ids:
+                showtimes.append(Showtime(
+                    movie_id=movie_id,
+                    room_id=room_id,
+                    show_date=show_date,
+                    show_time=show_time
+                ))
+    session.add_all(showtimes)
+    session.commit()
+
 def generate_report(start_date, end_date, room_id=None, movie_id=None):
     base_query = """
         SELECT Movies.title, Showtimes.show_date, Showtimes.show_time, Rooms.room_number, Movies.duration
         FROM Showtimes
-        JOIN Movies ON Showtimes.movie_id = Movies.movie_id
+        JOIN Movi es ON Showtimes.movie_id = Movies.movie_id
         JOIN Rooms ON Showtimes.room_id = Rooms.room_id
         WHERE Showtimes.show_date BETWEEN :start_date AND :end_date
     """
@@ -128,7 +151,6 @@ def generate_report(start_date, end_date, room_id=None, movie_id=None):
     result = session.execute(text(base_query), filters).fetchall()
     return result
 
-# Streamlit App
 st.title("Movie Theater Management System")
 
 tab1, tab2, tab3 = st.tabs(["Manage Movies", "Add New Movie", "Generate Movie Report"])
@@ -186,7 +208,8 @@ with tab2:
     if st.button("Add Movie"):
         new_movie = add_movie_orm(new_title, new_genre, new_duration, new_release_date)
         update_movie_rooms(new_movie.movie_id, room_ids)
-        st.success(f"New movie '{new_title}' added successfully!")
+        add_showtimes_for_movie(new_movie.movie_id, room_ids, new_release_date)
+        st.success(f"New movie '{new_title}' added successfully with showtimes!")
 
 with tab3:
     st.header("Generate Movie Report")
@@ -206,6 +229,6 @@ with tab3:
         report = generate_report(start_date, end_date, room_id, movie_id)
         if report:
             for row in report:
-                st.write(f"Movie: {row[0]}, Date: {row[1]}, Time: {row[2]}, Room: {row[3]}")
+                st.write(f"Movie: {row[0]}, Date: {row[1]}, Time: {row[2]}, Room: {row[3]}, Duration: {row[4]} minutes")
         else:
             st.write("No showtimes found.")
